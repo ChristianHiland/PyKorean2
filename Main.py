@@ -4,13 +4,11 @@ test = True
 
 if test:
     print("Test 1:", advanced_translate_logic("I like to program read and make games"))
-    # Result: 나는 프로그램, 읽다, 계략, 만들다를 좋아한다
-
     print("Test 2:", advanced_translate_logic("I think wolves are cute"))
-    # Result: 나는 늑대가 귀엽다 고 생각하다
-
     print("Test 3:", advanced_translate_logic("I go to the store"))
-    # Result: 나는 가게를 가다
+    print("Test 4:", advanced_translate_logic("I went to the store, and I bought some milk"))
+    print("Test 5:", advanced_translate_logic("He went to the store, and bought some milk"))
+    print("Test 6:", advanced_translate_logic("Lunbin went to the store, and he bought some milk"))
 else:
     words = input("Words: ")
     final = advanced_translate_logic(words)
