@@ -1,6 +1,6 @@
 from Helpers import *
 
-test = True
+test = False
 
 if test:
     print("Test 1:", advanced_translate_logic("I like to program read and make games"))
