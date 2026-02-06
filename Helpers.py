@@ -1,37 +1,13 @@
-from textblob import TextBlob
 from googletrans import Translator
+from textblob import TextBlob
+from google import genai
+import os
 
 translator = Translator()
-
-def translate_and_reorder(sentence):
-    blob = TextBlob(sentence)
-    translated_parts = []
-    
-    # Define our SOV buckets
-    structure = {'SUBJ': [], 'OBJ': [], 'VERB': [], 'OTHER': []}
-    print(blob.tags)
-    for word, tag in blob.tags:
-        # 1. Skip articles like 'the', 'a', 'an'
-        if tag == 'DT': 
-            continue
-            
-        # 2. Translate the word
-        ko_text = translator.translate(word.string, src='en', dest='ko').text
-        
-        # 3. Assign to bucket based on Tag
-        # NN = Noun, PRP = Pronoun, VB = Verb, JJ = Adjective
-        if tag in ['PRP', 'NNP'] and not structure['SUBJ']:
-            structure['SUBJ'].append(ko_text + "는") # Subject + Particle
-        elif tag in ['NN', 'NNS']:
-            structure['OBJ'].append(ko_text + "에")   # Object/Location + Particle
-        elif tag.startswith('VB'):
-            structure['VERB'].append(ko_text)       # Verb (ends the sentence)
-        else:
-            structure['OTHER'].append(ko_text)
-
-    # 4. Construct: Subject -> Other -> Object -> Verb
-    result = structure['SUBJ'] + structure['OTHER'] + structure['OBJ'] + structure['VERB']
-    return " ".join(result)
+GEMINI_KEY = os.getenv('GEMINI_TOKEN')
+geminiClient = None
+if GEMINI_KEY != None:
+    geminiClient = genai.Client(api_key=GEMINI_KEY)
 
 def advanced_translate_logic(sentence):
     blob = TextBlob(sentence)
@@ -48,15 +24,26 @@ def advanced_translate_logic(sentence):
     # Special flags
     is_mental_thought = False
     mental_verbs = ['think', 'say', 'believe', 'know', 'hope']
-    ignore_list = ['the', 'a', 'an', 'to', 'and']
+    ignore_list = ['the', 'a', 'an', 'to', "they", "'re"]
 
+
+    # Simple context check
+    current_word_index = 0
     # 1. Classification Loop
     for word, tag in blob.tags:
+        current_word_index = 1 + current_word_index
+        next_word = ""
+        next_tag = ""
+        
         clean_word = word.lower()
         
         # Skip filler words
         if clean_word in ignore_list:
             continue
+
+        if len(blob.tags) > current_word_index:
+            next_word = blob.tags[current_word_index][0]
+            next_tag = blob.tags[current_word_index][1]
             
         # Translate the word
         ko_word = translator.translate(clean_word, src='en', dest='ko').text
@@ -86,7 +73,12 @@ def advanced_translate_logic(sentence):
             if is_mental_thought:
                 objects.append(ko_word + "가")
             else:
-                objects.append(ko_word)
+                # Basic checking for a "FANBOYS" to attach a particle needed.
+                if next_tag == "CC":
+                    if next_word == "and":
+                        objects.append(ko_word+"과")
+                else:
+                    objects.append(ko_word)
 
     # 2. Assembly (SOV Structure)
     # Join objects/actions with commas
@@ -102,3 +94,78 @@ def advanced_translate_logic(sentence):
         # Add '를' only if there are objects
         particle = "를" if objects else ""
         return f"{subject} {obj_str}{particle} {mod_str} {verb_final}".strip()
+    
+def translate_final_logic(sentence):
+    # Split the sentence if there is a comma to handle two separate thoughts
+    parts = sentence.split(',')
+    translated_clauses = []
+
+    for part in parts:
+        blob = TextBlob(part.strip())
+        subject, verb, objects, modifiers = "", "", [], []
+        
+        # Extended ignore list to stop the 'Reply' and 'And' bugs
+        ignore_list = ['the', 'a', 'an', 'to', 'and', "'re", "they", "it", "is", "are"]
+
+        for i, (word, tag) in enumerate(blob.tags):
+            clean = word.lower()
+            if clean in ignore_list: continue
+
+            # Look ahead for list logic
+            next_tag = blob.tags[i+1][1] if i + 1 < len(blob.tags) else ""
+            
+            ko = translator.translate(clean, src='en', dest='ko').text
+            
+            # 1. SUBJECTS
+            if tag in ['PRP', 'NNP'] and not subject:
+                subject = ko + "는"
+            
+            # 2. VERBS (Action at the end)
+            elif tag.startswith('VB'):
+                # Special fix for 'like'
+                if clean == 'like': ko = "좋아한다"
+                verb = ko
+                
+            # 3. NOUNS (Objects)
+            elif tag.startswith('NN'):
+                # Clean up translation artifacts like '과' or '를' if they were pre-attached
+                ko = ko.replace('과', '').replace('를', '').replace('와', '')
+                
+                if next_tag == 'CC' or (i + 1 < len(blob.tags) and blob.tags[i+1][0] == ','):
+                    objects.append(ko + "와") # Add "and" particle
+                else:
+                    objects.append(ko)
+
+            # 4. ADJECTIVES
+            elif tag in ['JJ', 'RB']:
+                # If an adjective is at the end of a clause, it acts as the verb
+                if i == len(blob.tags) - 1:
+                    verb = ko 
+                else:
+                    modifiers.append(ko)
+
+        # Assemble Clause: Subj + Obj + Mod + Verb
+        obj_str = " ".join(objects)
+        if objects and verb == "좋아한다": 
+            obj_str += "를" # Only add '를' to the end of the object list
+            
+        clause = f"{subject} {obj_str} {' '.join(modifiers)} {verb}".strip()
+        translated_clauses.append(clause)
+
+    return " ".join(translated_clauses)
+
+class GeminiLearning:
+    def __init__(self):
+        self.client = geminiClient
+        self.basePrompt = ""
+        self.model_name = "gemini-2.5-flash"
+        self.learnFile = "LearningProgress.txt"
+
+    def Generate(self) -> str:
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=self.prompt + f" {self.fileContents}"
+            )
+
+    
